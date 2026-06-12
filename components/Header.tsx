@@ -24,8 +24,10 @@ export function Header() {
   useEffect(() => {
     const saved = window.localStorage.getItem("msd-beginner-mode");
     if (saved) {
-      setBeginnerMode(saved === "true");
-      document.documentElement.dataset.mode = saved === "true" ? "beginner" : "advanced";
+      const next = saved === "true";
+      document.documentElement.dataset.mode = next ? "beginner" : "advanced";
+      const timeout = window.setTimeout(() => setBeginnerMode(next), 0);
+      return () => window.clearTimeout(timeout);
     }
   }, []);
 

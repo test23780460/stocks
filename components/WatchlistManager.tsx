@@ -28,7 +28,8 @@ export function WatchlistManager() {
   useEffect(() => {
     const saved = window.localStorage.getItem("msd-watchlists");
     if (saved) {
-      setLists(JSON.parse(saved));
+      const timeout = window.setTimeout(() => setLists(JSON.parse(saved)), 0);
+      return () => window.clearTimeout(timeout);
     }
   }, []);
 
