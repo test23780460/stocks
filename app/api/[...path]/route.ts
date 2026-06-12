@@ -9,23 +9,25 @@ import {
   sortedByMomentum,
   unusualActivity
 } from "@/lib/market-data";
+import {
+  fetchAlphaVantageQuote,
+  fetchFiveYearDailyPrices,
+  fetchTechnicalIndicators,
+  hasAlphaVantageKey
+} from "@/lib/alpha-vantage";
 
 type Context = {
   params: Promise<{ path?: string[] }>;
 };
 
-const demoHeaders = {
-  "x-market-signal-data-mode": "demo"
-};
-
-function json(data: unknown, status = 200) {
+function json(data: unknown, status = 200, dataMode: "Demo Data" | "Live Data" = "Demo Data") {
   return Response.json(
     {
-      dataMode: "Demo Data",
+      dataMode,
       apiKeyNotes: API_KEY_NOTES,
       data
     },
-    { status, headers: demoHeaders }
+    { status, headers: { "x-market-signal-data-mode": dataMode === "Live Data" ? "live" : "demo" } }
   );
 }
 
@@ -37,23 +39,131 @@ export async function GET(_request: Request, context: Context) {
   const { path = [] } = await context.params;
   const pathname = routePath(path);
 
-  // ADD YOUR API KEY HERE: live data providers should be called from this server-only route layer.
+  // ADD YOUR API KEY HERE: set ALPHA_VANTAGE_API_KEY in server environment variables, never frontend files.
   if (pathname === "/market/live") {
     return json({ dashboard, assets, newsItems, unusualActivity });
+  }
+
+  if (pathname === "/cron/market-refresh") {
+    return json({
+      update_type: "snapshot",
+      assets_updated: assets.length,
+      status: "success",
+      api_source: hasAlphaVantageKey() ? "Alpha Vantage + Demo Data fallback" : "Demo Data",
+      alpha_vantage_configured: hasAlphaVantageKey(),
+      duration_ms: 0,
+      message: "Vercel cron endpoint is ready. Connect Supabase writes here to persist 5-minute snapshots."
+    });
   }
 
   if (pathname.startsWith("/market/asset/")) {
     const symbol = path[2];
     const asset = getAsset(symbol);
-    return asset ? json(asset) : json({ message: "Unknown symbol", symbol, found_status: false }, 404);
+
+    if (!asset) {
+      return json({ message: "Unknown symbol", symbol, found_status: false }, 404);
+    }
+
+    if (asset.type === "Stock" && hasAlphaVantageKey()) {
+      try {
+        return json(await fetchAlphaVantageQuote(asset), 200, "Live Data");
+      } catch (error) {
+        return json(
+          {
+            message: "Alpha Vantage quote request failed.",
+            symbol: asset.symbol,
+            provider: "Alpha Vantage",
+            error: error instanceof Error ? error.message : "Unknown error"
+          },
+          502
+        );
+      }
+    }
+
+    return json(asset);
   }
 
   if (pathname.startsWith("/market/historical/")) {
     const symbol = path[2];
     const asset = getAsset(symbol);
-    return asset
-      ? json({ symbol: asset.symbol, asset_type: asset.type, prices: asset.sparkline.map((close, index) => ({ close, timestamp: `T-${6 - index}` })) })
-      : json({ message: "Unknown symbol", symbol, found_status: false }, 404);
+
+    if (!asset) {
+      return json({ message: "Unknown symbol", symbol, found_status: false }, 404);
+    }
+
+    if (asset.type === "Stock" && hasAlphaVantageKey()) {
+      try {
+        return json(
+          {
+            symbol: asset.symbol,
+            asset_type: asset.type,
+            provider: "Alpha Vantage",
+            range: "5 years",
+            adjusted_close_available: true,
+            prices: await fetchFiveYearDailyPrices(asset.symbol)
+          },
+          200,
+          "Live Data"
+        );
+      } catch (error) {
+        return json(
+          {
+            message: "Alpha Vantage historical price request failed.",
+            symbol: asset.symbol,
+            provider: "Alpha Vantage",
+            error: error instanceof Error ? error.message : "Unknown error"
+          },
+          502
+        );
+      }
+    }
+
+    return json({
+      symbol: asset.symbol,
+      asset_type: asset.type,
+      provider: "Demo Data",
+      range: "mock mini-series",
+      prices: asset.sparkline.map((close, index) => ({ close, timestamp: `T-${6 - index}` }))
+    });
+  }
+
+  if (pathname.startsWith("/market/technical/")) {
+    const symbol = path[2];
+    const asset = getAsset(symbol);
+
+    if (!asset) {
+      return json({ message: "Unknown symbol", symbol, found_status: false }, 404);
+    }
+
+    if (asset.type !== "Stock") {
+      return json({ message: "Alpha Vantage technical indicators are configured for stock symbols in this build.", symbol }, 400);
+    }
+
+    if (!hasAlphaVantageKey()) {
+      return json({
+        symbol: asset.symbol,
+        provider: "Demo Data",
+        indicators: {
+          sma50: { date: "demo", value: { SMA: String(asset.sparkline.at(-1) ?? asset.price) } },
+          rsi14: { date: "demo", value: { RSI: String(Math.round(asset.momentumScore * 0.8)) } },
+          macd: { date: "demo", value: { MACD: "0.00", MACD_Hist: "0.00", MACD_Signal: "0.00" } }
+        }
+      });
+    }
+
+    try {
+      return json(await fetchTechnicalIndicators(asset.symbol), 200, "Live Data");
+    } catch (error) {
+      return json(
+        {
+          message: "Alpha Vantage technical indicator request failed.",
+          symbol: asset.symbol,
+          provider: "Alpha Vantage",
+          error: error instanceof Error ? error.message : "Unknown error"
+        },
+        502
+      );
+    }
   }
 
   if (pathname === "/market/trending") {

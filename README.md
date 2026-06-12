@@ -30,10 +30,13 @@ The app uses safe research labels:
 
 ```bash
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
 Then open `http://localhost:3000`.
+
+Add your server-only API keys to `.env.local`. Do not prefix secret keys with `NEXT_PUBLIC_`.
 
 ## Key routes
 
@@ -60,9 +63,11 @@ Examples:
 - `GET /api/market/live`
 - `GET /api/market/asset/NVDA`
 - `GET /api/market/historical/BTC`
+- `GET /api/market/technical/NVDA`
 - `GET /api/market/trending`
 - `GET /api/market/mood`
 - `GET /api/market/unusual-activity`
+- `GET /api/cron/market-refresh`
 - `POST /api/predictions/create`
 - `GET /api/predictions/asset/NVDA`
 - `GET /api/predictions/accuracy/stats`
@@ -80,7 +85,7 @@ The demo build intentionally ships with mock data for:
 - Stocks: AAPL, TSLA, NVDA, MSFT, AMZN, META, GOOGL
 - Crypto: BTC, ETH, SOL, XRP, DOGE, ADA, AVAX
 
-Live provider integration should be added server-side in `app/api/[...path]/route.ts`.
+Live provider integration is handled server-side in `app/api/[...path]/route.ts`.
 
 Required key comments are present in code as:
 
@@ -90,11 +95,39 @@ Required key comments are present in code as:
 
 Recommended providers:
 
-- Stocks: Polygon, Finnhub, IEX Cloud, Alpha Vantage
+- Stocks: Alpha Vantage is wired through the server-only `ALPHA_VANTAGE_API_KEY` environment variable
 - Crypto: CoinGecko Pro, CoinMarketCap, Coinbase
 - News: NewsAPI, Benzinga, licensed market feed
 - AI summaries: preferred AI provider
 - Discord alerts: owner webhook URL
+
+### Alpha Vantage stock data
+
+When `ALPHA_VANTAGE_API_KEY` is configured, stock routes use Alpha Vantage from server-side API routes only:
+
+- `GET /api/market/asset/AAPL` uses `GLOBAL_QUOTE`
+- `GET /api/market/historical/AAPL` uses `TIME_SERIES_DAILY_ADJUSTED` with `outputsize=full`, filters to 5 years, and returns daily open, high, low, close, adjusted close, volume, dividends, and splits when available
+- `GET /api/market/technical/AAPL` returns daily SMA 50, RSI 14, and MACD data
+
+If the key is missing, those routes return visible `Demo Data` fallback responses. If Alpha Vantage returns an error or rate-limit notice, the API returns a structured `502` error without exposing the key.
+
+## Vercel hosting
+
+This repo is ready for Vercel hosting.
+
+1. Import the GitHub repository in Vercel.
+2. Keep the framework preset as Next.js.
+3. Add the environment variable in Vercel:
+   - Name: `ALPHA_VANTAGE_API_KEY`
+   - Value: use the Alpha Vantage key you provided
+   - Environments: Production, Preview, and Development as needed
+4. Deploy.
+5. Open these URLs after deploy to confirm server-side data access:
+   - `/api/market/asset/AAPL`
+   - `/api/market/historical/AAPL`
+   - `/api/market/technical/AAPL`
+
+`vercel.json` includes a 5-minute cron entry for `/api/cron/market-refresh`. The endpoint is prepared for refresh logging and can persist snapshots after Supabase credentials are added.
 
 ## Database
 
