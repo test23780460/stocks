@@ -127,7 +127,18 @@ This repo is ready for Vercel hosting.
    - `/api/market/historical/AAPL`
    - `/api/market/technical/AAPL`
 
-`vercel.json` includes a 5-minute cron entry for `/api/cron/market-refresh`. The endpoint is prepared for refresh logging and can persist snapshots after Supabase credentials are added.
+The refresh endpoint `/api/cron/market-refresh` is prepared for refresh logging and can persist snapshots after Supabase credentials are added. It is not auto-scheduled in `vercel.json` so the first Vercel deploy works on every plan. If your Vercel project supports high-frequency cron jobs, add a 5-minute schedule for that endpoint from Vercel or re-add this cron entry:
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/market-refresh",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
+```
 
 ## Database
 
